@@ -4,6 +4,12 @@
 
 v0.2.0 · Python 3.9+ · stdlib only (external engines optional)
 
+> **⚠️ 프로토타입 고지**
+> 본 패키지는 개인 케어 운영 스택의 **소프트웨어 프로토타입**이다.
+> 의료 진단·치료·응급 대응을 위한 인증 시스템이 아니며,
+> 자율주행 완성 기기를 포함하지 않는다.
+> 실제 케어 환경에서의 하드웨어 연동, 안전 인증, 임상 검증은 별도로 필요하다.
+
 ---
 
 ## 이 시스템이 무엇인가
@@ -196,6 +202,10 @@ m(t) = m₀ × exp(-(t - t₀) / τ)
 tid = SHA-256(from_platform ‖ to_platform ‖ t_s)[:16]
 ```
 
+> **설계 범위:** 이 토큰은 플랫폼 전환의 **식별(identification)·추적(trace) 목적**의
+> 감사 토큰이다. 서명·재생 공격 방지·세션 키를 포함한 전체 보안 핸드오프 구현은
+> 실제 배포 단계에서 별도로 설계해야 한다.
+
 ### 감사 블록 체인
 ```
 h_n = SHA-256(h_{n-1} ‖ event_type ‖ platform ‖ t_s ‖ data)
@@ -354,6 +364,10 @@ AgedCare_Stack — AI 케어 여정 시뮬레이션
 python -m pytest tests/test_aged_care.py -v
 ```
 
+> **테스트 범위:** 아래 137개는 소프트웨어 **논리·통합 테스트**다.
+> 데이터 계약 정합성, 상태 기계 전이, Ω 수식, 핸드오프 프로토콜을 검증한다.
+> 실제 하드웨어 연동·임상 케어·실도로 자율주행의 현실 검증은 포함하지 않는다.
+
 | 섹션 | 내용 | 결과 |
 |------|------|------|
 | §1 | 데이터 스키마 & 파생 지표 | ✅ |
@@ -364,7 +378,7 @@ python -m pytest tests/test_aged_care.py -v
 | §6 | CarPlatform 틱 동작 | ✅ |
 | §7 | CareAgent 통합 | ✅ |
 | §8 | 새 레이어 (PersonState, CareChain, Cognitive, Battery, SNN, Emergency, OmegaMonitor) | ✅ |
-| **합계** | | **137 passed** |
+| **합계** | | **137 passed (논리·통합 테스트 기준)** |
 
 ---
 
