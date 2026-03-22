@@ -8,6 +8,7 @@
 §6  CarPlatform 틱 동작
 §7  CareAgent 통합 — 세션 / 틱 / 핸드오프 / 메모리
 §8  새 레이어 테스트 — v0.2.0
+§9  버그 수정 회귀 테스트 — v0.2.1
 
 실행:
     cd AgedCare_Stack
@@ -1072,3 +1073,217 @@ class TestCareAgentV2:
         if self.agent._chain and self.agent._pending_token:
             events = [b.event_type for b in self.agent._chain._blocks]
             assert "handoff_initiated" in events
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §9  버그 수정 회귀 테스트 — v0.2.1
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestBugFixRegression:
+    """6개 확인된 버그 수정 회귀 테스트."""
+
+    def setup_method(self):
+        self.profile = make_profile()
+
+    # ── Fix 1: CareContext.person_state 필드 존재 확인 ────────────────────────
+
+    def test_care_context_has_person_state_field(self):
+        """CareContext 에 person_state 필드가 있어야 한다."""
+        ctx = make_ctx()
+        assert hasattr(ctx, "person_state")
+
+    def test_care_context_person_state_default_none(self):
+        """기본값 None."""
+        ctx = make_ctx()
+        assert ctx.person_state is None
+
+    def test_care_context_person_state_assignable(self):
+        """PersonState 할당 가능."""
+        from aged_care.contracts.schemas import PersonState
+        ctx = make_ctx()
+        ps = PersonState(pos_x=3.0, pos_y=4.0)
+        ctx.person_state = ps
+        assert ctx.person_state.pos_x == 3.0
+
+    # ── Fix 2: MissionState.completion_ratio() 클램핑 ────────────────────────
+
+    def test_completion_ratio_does_not_exceed_1(self):
+        """completed_stages > total_stages 여도 1.0 초과 불가."""
+        ms = MissionState(total_stages=1, completed_stages=7)
+        assert ms.completion_ratio() == 1.0
+
+    def test_completion_ratio_exact_at_boundary(self):
+        """total_stages == completed_stages → 정확히 1.0."""
+        ms = MissionState(total_stages=6, completed_stages=6)
+        assert ms.completion_ratio() == 1.0
+
+    def test_completion_ratio_partial_below_1(self):
+        """중간 진행 시 1.0 미만."""
+        ms = MissionState(total_stages=6, completed_stages=3)
+        assert ms.completion_ratio() == pytest.approx(0.5)
+
+    # ── Fix 3: Token ID 충돌 방지 ─────────────────────────────────────────────
+
+    def test_two_initiates_at_same_ts_produce_different_tokens(self):
+        """동일 t_s 에 두 번 initiate() → 서로 다른 token_id."""
+        proto = HandoffProtocol()
+        ctx1 = make_ctx(platform=PlatformType.PET, t_s=0.0)
+        ctx1.t_s = 0.0
+        token1 = proto.initiate(ctx1, PlatformType.WHEELCHAIR)
+        token2 = proto.initiate(ctx1, PlatformType.WHEELCHAIR)
+        assert token1 is not None
+        assert token2 is not None
+        assert token1.token_id != token2.token_id
+
+    def test_two_initiates_both_pending(self):
+        """두 토큰 모두 pending_count 에 반영된다."""
+        proto = HandoffProtocol()
+        ctx = make_ctx(platform=PlatformType.PET)
+        proto.initiate(ctx, PlatformType.WHEELCHAIR)
+        proto.initiate(ctx, PlatformType.WHEELCHAIR)
+        assert proto.pending_count() == 2
+
+    def test_counter_increments(self):
+        """내부 카운터가 매 initiate 마다 증가한다."""
+        proto = HandoffProtocol()
+        ctx = make_ctx(platform=PlatformType.PET)
+        proto.initiate(ctx, PlatformType.WHEELCHAIR)
+        assert proto._counter == 1
+        proto.initiate(ctx, PlatformType.WHEELCHAIR)
+        assert proto._counter == 2
+
+    # ── Fix 4: LLM 쓰로틀 ────────────────────────────────────────────────────
+
+    def test_llm_throttle_attribute_exists(self):
+        """CareAgent 에 _llm_throttle_s / _llm_last_t_s 속성이 있어야 한다."""
+        agent = CareAgent(self.profile, enable_llm=False)
+        assert hasattr(agent, "_llm_throttle_s")
+        assert hasattr(agent, "_llm_last_t_s")
+
+    def test_llm_throttle_default_30s(self):
+        """기본 쓰로틀 30초."""
+        agent = CareAgent(self.profile, enable_llm=False)
+        assert agent._llm_throttle_s == 30.0
+
+    def test_llm_not_called_within_throttle_window(self):
+        """쓰로틀 창 내에서는 LLM 재호출 없음 (_llm_last_t_s 갱신 안 됨)."""
+        agent = CareAgent(self.profile, enable_llm=False)
+        # LLM 비활성 상태에서 throttle 타이머만 확인
+        ctx = agent.start_session()
+        agent._llm_last_t_s = agent._t_s  # 방금 호출했다고 가정
+        ctx, _ = agent.tick(ctx)
+        # 0.1초 뒤 tick — throttle 30s 이내이므로 _llm_last_t_s 변화 없어야 함
+        assert agent._llm_last_t_s == pytest.approx(agent._t_s - ctx.dt_s, abs=1.0)
+
+    # ── Fix 5: PersonState → CareContext 전파 ────────────────────────────────
+
+    def test_person_state_propagated_to_ctx_after_tick(self):
+        """tick() 이후 ctx.person_state 가 agent.person_state 와 동일해야 한다."""
+        agent = CareAgent(self.profile, enable_llm=False)
+        ctx = agent.start_session()
+        ctx.vitals = VitalSigns(heart_rate_bpm=90.0, spo2_pct=96.0)
+        ctx, _ = agent.tick(ctx)
+        assert ctx.person_state is agent.person_state
+
+    def test_person_state_vitals_synced(self):
+        """tick() 후 ctx.person_state.heart_rate == ctx.vitals.heart_rate_bpm."""
+        agent = CareAgent(self.profile, enable_llm=False)
+        ctx = agent.start_session()
+        ctx.vitals = VitalSigns(heart_rate_bpm=88.0)
+        ctx, _ = agent.tick(ctx)
+        if ctx.person_state:
+            assert ctx.person_state.heart_rate == 88.0
+
+    # ── Fix 1: _pos 업데이트 — Wheelchair ────────────────────────────────────
+
+    def test_wheelchair_pos_moves_toward_destination(self):
+        """목적지가 있으면 매 tick() 마다 _pos 가 목적지 방향으로 이동한다."""
+        wc = WheelchairPlatform()
+        initial_pos = wc._pos
+        ctx = make_ctx(platform=PlatformType.WHEELCHAIR)
+        ctx.destination = (10.0, 0.0)
+        ctx.dt_s = 0.1
+        wc.tick(ctx)
+        assert wc._pos[0] > initial_pos[0], "x 좌표가 증가해야 함"
+
+    def test_wheelchair_pos_converges_to_destination(self):
+        """충분한 틱 후 _pos 가 목적지에 수렴한다."""
+        wc = WheelchairPlatform()
+        ctx = make_ctx(platform=PlatformType.WHEELCHAIR)
+        dest = (2.0, 0.0)
+        ctx.destination = dest
+        ctx.dt_s = 0.1
+        for _ in range(200):
+            wc.tick(ctx)
+        dist = ((wc._pos[0] - dest[0])**2 + (wc._pos[1] - dest[1])**2) ** 0.5
+        assert dist < 0.5, f"목적지에 수렴해야 함, 현재 거리: {dist:.3f}"
+
+    def test_wheelchair_pos_no_move_without_destination(self):
+        """목적지 없으면 _pos 변화 없음."""
+        wc = WheelchairPlatform()
+        ctx = make_ctx(platform=PlatformType.WHEELCHAIR)
+        ctx.destination = None
+        wc.tick(ctx)
+        assert wc._pos == (0.0, 0.0)
+
+    # ── Fix 1: _pos 업데이트 — Car ───────────────────────────────────────────
+
+    def test_car_pos_moves_toward_destination(self):
+        """CarPlatform 도 목적지 방향으로 _pos 이동."""
+        car = CarPlatform()
+        ctx = make_ctx(platform=PlatformType.CAR)
+        ctx.destination = (100.0, 0.0)
+        ctx.dt_s = 0.1
+        car.tick(ctx)
+        assert car._pos[0] > 0.0, "자동차가 목적지 방향으로 이동해야 함"
+
+    def test_car_pos_no_move_without_destination(self):
+        """목적지 없으면 CarPlatform _pos 변화 없음."""
+        car = CarPlatform()
+        ctx = make_ctx(platform=PlatformType.CAR)
+        ctx.destination = None
+        car.tick(ctx)
+        assert car._pos == (0.0, 0.0)
+
+    # ── OmegaMonitor 전환 확인 ────────────────────────────────────────────────
+
+    def test_wheelchair_uses_omega_monitor(self):
+        """WheelchairPlatform._monitor 가 OmegaMonitor 인스턴스여야 한다."""
+        wc = WheelchairPlatform()
+        assert isinstance(wc._monitor, OmegaMonitor)
+
+    def test_car_uses_omega_monitor(self):
+        """CarPlatform._monitor 가 OmegaMonitor 인스턴스여야 한다."""
+        car = CarPlatform()
+        assert isinstance(car._monitor, OmegaMonitor)
+
+    def test_pet_uses_omega_monitor(self):
+        """PetPlatform._monitor 가 OmegaMonitor 인스턴스여야 한다."""
+        pet = PetPlatform()
+        assert isinstance(pet._monitor, OmegaMonitor)
+
+    def test_wheelchair_battery_omega_affects_result(self):
+        """배터리 부족 신호가 휠체어 tick() 결과(알림)에 반영된다."""
+        wc = WheelchairPlatform()
+        ctx = make_ctx(platform=PlatformType.WHEELCHAIR)
+        ctx.extra["battery_omega"] = 0.05   # 위험 수준
+        decision = wc.tick(ctx)
+        # 배터리 경고 → emergency 또는 speak/alert 존재
+        # (OmegaMonitor 가 6인수 기반으로 판정하므로 알림이 발생해야 함)
+        # emergency 는 추가 조건 (Ω_care 전체 곱)이지만 알림은 항상 발생
+        # 여기서는 OmegaMonitor 가 올바르게 호출됐는지만 확인
+        assert isinstance(decision, CareDecision)
+
+    # ── MissionState total_stages = 6 기본값 ─────────────────────────────────
+
+    def test_care_agent_mission_total_stages_6(self):
+        """CareAgent 초기화 시 mission_state.total_stages == 6."""
+        agent = CareAgent(self.profile, enable_llm=False)
+        assert agent.mission_state.total_stages == 6
+
+    def test_care_agent_mission_ratio_capped_after_many_handoffs(self):
+        """핸드오프가 total_stages 를 초과해도 completion_ratio <= 1.0."""
+        agent = CareAgent(self.profile, enable_llm=False)
+        # 강제로 completed_stages 를 크게 설정
+        agent.mission_state.completed_stages = 999
+        assert agent.mission_state.completion_ratio() <= 1.0

@@ -20,6 +20,7 @@ from ..contracts.schemas import (
     CareContext, CareDecision, PlatformType
 )
 from ..monitor import CareMonitor
+from ..monitor.omega import OmegaMonitor
 
 
 class PetPlatform(PlatformBase):
@@ -34,7 +35,7 @@ class PetPlatform(PlatformBase):
 
     def __init__(self):
         super().__init__()
-        self._monitor = CareMonitor()
+        self._monitor = OmegaMonitor()   # 6인수 Ω (배터리·인지 포함)
         self._follow_distance_m = 1.0    # 주인과 유지할 거리
         self._tick_count = 0
 
@@ -49,7 +50,9 @@ class PetPlatform(PlatformBase):
           5. 동반 이동 (follow)
         """
         self._tick_count += 1
-        result = self._monitor.tick(ctx)
+        bat_omega = float(ctx.extra.get("battery_omega", 1.0))
+        cog_omega = float(ctx.extra.get("cognitive_omega", 1.0))
+        result = self._monitor.tick(ctx, bat_omega, cog_omega)
         decision = CareDecision()
 
         # ── 1. 긴급 상황 ───────────────────────────────────────────

@@ -141,6 +141,7 @@ class CareContext:
     t_s: float                          = 0.0
     dt_s: float                         = 0.1
     extra: Dict[str, Any]               = field(default_factory=dict)
+    person_state: Optional["PersonState"] = None   # 10차원 상태 벡터 (Layer 0 → Layer 2)
 
 
 # ── 확장 스키마 v0.2.0 ────────────────────────────────────────────────────────
@@ -231,7 +232,7 @@ class MissionState:
     def completion_ratio(self) -> float:
         """M ∈ [0, 1]"""
         if self.total_stages == 0: return 1.0
-        return self.completed_stages / self.total_stages
+        return min(1.0, self.completed_stages / self.total_stages)
 
     def next_waypoint(self) -> Optional[Tuple[float, float]]:
         return self.waypoints[0] if self.waypoints else self.current_destination

@@ -116,6 +116,7 @@ class CareAgent:
         self.mission_state = MissionState(
             mission_id="default",
             description="일상 케어",
+            total_stages=6,      # 왕복 핸드오프 기준 (PET→WC→CAR→WC→CAR→WC→PET)
             origin=profile.home_location,
         )
         self.safety_state  = SafetyState()
@@ -133,6 +134,9 @@ class CareAgent:
         self._pending_token: Optional[HandoffToken] = None
         self._enable_llm = enable_llm
         self._last_omega: float = 1.0
+        self._llm_last_t_s: float = -999.0   # LLM 호출 쓰로틀 (30초 간격)
+        LLM_THROTTLE_S = 30.0                # 상수 (인스턴스 속성으로 노출)
+        self._llm_throttle_s: float = LLM_THROTTLE_S
 
         # 초기 감사 기록
         if self._chain:
@@ -185,11 +189,13 @@ class CareAgent:
         platform = self._platforms[self._current_platform]
         decision = platform.tick(ctx)
 
-        # ── 3. LLM 케어 판단 (보강) ──────────────────────────────────
+        # ── 3. LLM 케어 판단 (보강, 30초 쓰로틀) ────────────────────
         if decision.speak is None and not decision.emergency:
-            llm_speak = self._llm_decide(ctx)
-            if llm_speak:
-                decision.speak = llm_speak
+            if (self._t_s - self._llm_last_t_s) >= self._llm_throttle_s:
+                llm_speak = self._llm_decide(ctx)
+                if llm_speak:
+                    decision.speak = llm_speak
+                    self._llm_last_t_s = self._t_s
 
         # ── 4. Ω 통합 안전 판정 ─────────────────────────────────────
         bat_omega = float(ctx.extra.get("battery_omega", 1.0))
@@ -227,6 +233,9 @@ class CareAgent:
 
         # ── 7. 기억 업데이트 ─────────────────────────────────────────
         self._update_memory(ctx, decision)
+
+        # ── PersonState → CareContext 전파 (Layer 0 → Layer 2) ──────
+        ctx.person_state = self.person_state
 
         # ── 8. 감사 기록 (중요 이벤트만) ────────────────────────────
         if self._chain and decision.emergency:

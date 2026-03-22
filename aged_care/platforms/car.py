@@ -20,6 +20,7 @@ from ..contracts.schemas import (
     CareContext, CareDecision, PlatformType
 )
 from ..monitor import CareMonitor
+from ..monitor.omega import OmegaMonitor
 
 
 class CarConfig:
@@ -47,7 +48,7 @@ class CarPlatform(PlatformBase):
     def __init__(self, config: Optional[CarConfig] = None):
         super().__init__()
         self._cfg     = config or CarConfig()
-        self._monitor = CareMonitor()
+        self._monitor = OmegaMonitor()   # 6인수 Ω (배터리·인지 포함)
         self._pos     = (0.0, 0.0)
         self._speed   = 0.0
         self._tick    = 0
@@ -75,7 +76,9 @@ class CarPlatform(PlatformBase):
           5. 차 내 케어 대화
         """
         self._tick += 1
-        result   = self._monitor.tick(ctx)
+        bat_omega = float(ctx.extra.get("battery_omega", 1.0))
+        cog_omega = float(ctx.extra.get("cognitive_omega", 1.0))
+        result   = self._monitor.tick(ctx, bat_omega, cog_omega)
         decision = CareDecision()
 
         # ── 1. 긴급 (생체 이상) ───────────────────────────────────
@@ -110,6 +113,18 @@ class CarPlatform(PlatformBase):
             if self._runner is not None:
                 # SYD_DRIFT 실제 연동 (설치된 경우)
                 pass  # runner.step() 호출 위치
+            # 위치 업데이트 — 자동차 순항 속도로 목적지 방향 이동
+            dx = ctx.destination[0] - self._pos[0]
+            dy = ctx.destination[1] - self._pos[1]
+            dist = (dx**2 + dy**2) ** 0.5
+            if dist > 1e-6:
+                spd = min(self._cfg.comfort_speed_ms, dist * 0.5)
+                move = spd * ctx.dt_s
+                ratio = min(1.0, move / dist)
+                self._pos = (
+                    self._pos[0] + dx * ratio,
+                    self._pos[1] + dy * ratio,
+                )
         else:
             decision.action = "idle"
 

@@ -21,6 +21,7 @@ from ..contracts.schemas import (
     CareContext, CareDecision, PlatformType
 )
 from ..monitor import CareMonitor
+from ..monitor.omega import OmegaMonitor
 
 
 class WheelchairConfig:
@@ -54,7 +55,7 @@ class WheelchairPlatform(PlatformBase):
     def __init__(self, config: Optional[WheelchairConfig] = None):
         super().__init__()
         self._cfg     = config or WheelchairConfig()
-        self._monitor = CareMonitor()
+        self._monitor = OmegaMonitor()   # 6인수 Ω (배터리·인지 포함)
         self._pos     = (0.0, 0.0)       # 현재 위치 (x, y)
         self._speed   = 0.0
         self._heading = 0.0
@@ -79,7 +80,9 @@ class WheelchairPlatform(PlatformBase):
           4. 자율 경로 추종
         """
         self._tick += 1
-        result  = self._monitor.tick(ctx)
+        bat_omega = float(ctx.extra.get("battery_omega", 1.0))
+        cog_omega = float(ctx.extra.get("cognitive_omega", 1.0))
+        result  = self._monitor.tick(ctx, bat_omega, cog_omega)
         decision = CareDecision()
 
         # ── 1. 긴급 ──────────────────────────────────────────────
@@ -117,6 +120,17 @@ class WheelchairPlatform(PlatformBase):
             actuator = self._navigate(ctx)
             decision.action = "navigate"
             decision.navigation_goal = ctx.destination
+            # 위치 업데이트 — 매 틱마다 목적지 방향으로 이동
+            dx = ctx.destination[0] - self._pos[0]
+            dy = ctx.destination[1] - self._pos[1]
+            dist = (dx**2 + dy**2) ** 0.5
+            if dist > 1e-6:
+                move = actuator.speed_ms * ctx.dt_s
+                ratio = min(1.0, move / dist)
+                self._pos = (
+                    self._pos[0] + dx * ratio,
+                    self._pos[1] + dy * ratio,
+                )
             # 알림이 있으면 TTS
             if result.alerts:
                 decision.speak = result.alerts[0]

@@ -33,8 +33,9 @@ ALLOWED_TRANSITIONS = {
 }
 
 
-def _token_id(from_p: PlatformType, to_p: PlatformType, t_s: float) -> str:
-    raw = f"{from_p}|{to_p}|{t_s:.3f}"
+def _token_id(from_p: PlatformType, to_p: PlatformType, t_s: float,
+              counter: int = 0) -> str:
+    raw = f"{from_p}|{to_p}|{t_s:.3f}|{counter}"
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
@@ -50,6 +51,7 @@ class HandoffProtocol:
 
     def __init__(self):
         self._pending: Dict[str, HandoffToken] = {}
+        self._counter: int = 0   # 동시각 initiate() 충돌 방지
 
     def initiate(
         self,
@@ -64,7 +66,8 @@ class HandoffProtocol:
         if (from_platform, to_platform) not in ALLOWED_TRANSITIONS:
             return None   # 직접 PET→CAR 같은 불허 경로 차단
 
-        tid = _token_id(from_platform, to_platform, ctx.t_s)
+        self._counter += 1
+        tid = _token_id(from_platform, to_platform, ctx.t_s, self._counter)
         token = HandoffToken(
             token_id=tid,
             from_platform=from_platform,
