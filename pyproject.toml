@@ -4,11 +4,11 @@ build-backend = "setuptools.backends.legacy:build"
 
 [project]
 name            = "aged-care-stack"
-version         = "0.1.0"
+version         = "0.2.0"
 description     = "AI 케어 시스템 — 하나의 에이전트가 AI 펫·자율 휠체어·자율 자동차를 넘나들며 노인을 케어한다"
 readme          = "README.md"
 license         = {text = "MIT"}
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 keywords        = ["aged-care", "autonomous", "wheelchair", "care-agent", "ai-pet"]
 
 [project.optional-dependencies]

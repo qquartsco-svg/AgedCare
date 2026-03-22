@@ -3,6 +3,8 @@
 AI 펫 → 자율 휠체어 → 자율 자동차 → 자율 휠체어 → AI 펫
 하나의 AI 에이전트가 모든 플랫폼에서 연속으로 케어한다.
 """
+__version__ = "0.2.0"
+
 from .care_agent import CareAgent
 from .monitor    import CareMonitor, MonitorResult
 from .handoff.protocol import HandoffProtocol
