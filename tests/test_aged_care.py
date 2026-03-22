@@ -7,6 +7,7 @@
 §5  WheelchairPlatform 틱 동작
 §6  CarPlatform 틱 동작
 §7  CareAgent 통합 — 세션 / 틱 / 핸드오프 / 메모리
+§8  새 레이어 테스트 — v0.2.0
 
 실행:
     cd AgedCare_Stack
@@ -623,3 +624,451 @@ class TestCareAgent:
         if self.agent._pending_token:
             self.agent.execute_handoff(ctx)
             assert self.agent.current_platform == PlatformType.CAR
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# §8  새 레이어 테스트 — v0.2.0
+# ─────────────────────────────────────────────────────────────────────────────
+
+from aged_care.contracts.schemas import (
+    PersonState, MissionState, SafetyState, ScheduleEvent, CareGoal,
+)
+from aged_care.audit.care_chain import CareChain, CareBlock
+from aged_care.cognitive.emotion_engine import EmotionEngine, EmotionState
+from aged_care.cognitive.memory_engine import MemoryEngine, MemoryTrace
+from aged_care.cognitive.action_engine import ActionEngine, ActionScore
+from aged_care.adapters.cognitive_adapter import CognitiveAdapter, CognitiveReport
+from aged_care.adapters.battery_adapter import BatteryAdapter, BatteryReport
+from aged_care.adapters.snn_adapter import SNNAdapter, SpikePattern
+from aged_care.adapters.emergency_adapter import EmergencyAdapter, EmergencyEvent
+from aged_care.monitor.omega import OmegaMonitor, OmegaReport
+
+
+class TestPersonState:
+    def test_emotion_magnitude_neutral(self):
+        ps = PersonState()
+        # valence=0.5, arousal=0.3 → v_c=0.0, E=0.3
+        mag = ps.emotion_magnitude()
+        assert abs(mag - 0.3) < 1e-6
+
+    def test_emotion_magnitude_distressed(self):
+        ps = PersonState(valence=0.1, arousal=0.9)
+        mag = ps.emotion_magnitude()
+        assert mag > 0.3
+
+    def test_emotion_angle_deg_positive_arousal(self):
+        ps = PersonState(valence=0.5, arousal=0.5)
+        angle = ps.emotion_angle_deg()
+        # arctan(0.5 / ~0) ≈ 90 degrees (high arousal)
+        assert angle > 0
+
+    def test_as_vector_length(self):
+        ps = PersonState()
+        vec = ps.as_vector()
+        assert len(vec) == 10
+
+    def test_as_vector_values(self):
+        ps = PersonState(pos_x=1.0, pos_y=2.0, heart_rate=80.0)
+        vec = ps.as_vector()
+        assert vec[0] == 1.0
+        assert vec[1] == 2.0
+        assert vec[4] == 80.0
+
+
+class TestMissionState:
+    def test_completion_ratio_zero(self):
+        ms = MissionState(total_stages=4, completed_stages=0)
+        assert ms.completion_ratio() == 0.0
+
+    def test_completion_ratio_half(self):
+        ms = MissionState(total_stages=4, completed_stages=2)
+        assert ms.completion_ratio() == 0.5
+
+    def test_completion_ratio_full(self):
+        ms = MissionState(total_stages=4, completed_stages=4)
+        assert ms.completion_ratio() == 1.0
+
+    def test_completion_ratio_zero_stages(self):
+        ms = MissionState(total_stages=0, completed_stages=0)
+        assert ms.completion_ratio() == 1.0
+
+    def test_next_waypoint_returns_first(self):
+        ms = MissionState(waypoints=[(1.0, 2.0), (3.0, 4.0)])
+        assert ms.next_waypoint() == (1.0, 2.0)
+
+    def test_next_waypoint_falls_back_to_destination(self):
+        ms = MissionState(current_destination=(5.0, 6.0))
+        assert ms.next_waypoint() == (5.0, 6.0)
+
+    def test_next_waypoint_none_when_empty(self):
+        ms = MissionState()
+        assert ms.next_waypoint() is None
+
+
+class TestCareChain:
+    def test_empty_chain_verifies(self):
+        chain = CareChain()
+        assert chain.verify()
+
+    def test_record_adds_block(self):
+        chain = CareChain()
+        chain.record("session_start", PlatformType.PET, 0.0)
+        assert chain.length == 1
+
+    def test_multiple_records(self):
+        chain = CareChain()
+        chain.record("handoff", PlatformType.PET, 0.0, {"to": "wheelchair"})
+        chain.record("vitals_alert", PlatformType.WHEELCHAIR, 5.0, {"hr": 130})
+        assert chain.length == 2
+
+    def test_verify_after_records(self):
+        chain = CareChain()
+        chain.record("event1", PlatformType.PET, 1.0)
+        chain.record("event2", PlatformType.WHEELCHAIR, 2.0)
+        assert chain.verify()
+
+    def test_tamper_breaks_verify(self):
+        chain = CareChain()
+        chain.record("event1", PlatformType.PET, 1.0, {"x": 1})
+        # Tamper with block data
+        chain._blocks[0].data["x"] = 999
+        assert not chain.verify()
+
+    def test_head_hash_changes_after_record(self):
+        chain = CareChain()
+        h0 = chain.head_hash
+        chain.record("event1", PlatformType.PET, 0.0)
+        assert chain.head_hash != h0
+
+    def test_block_has_correct_fields(self):
+        chain = CareChain()
+        block = chain.record("handoff", PlatformType.WHEELCHAIR, 10.0, {"key": "val"})
+        assert block.index == 0
+        assert block.event_type == "handoff"
+        assert block.platform == "wheelchair"
+        assert block.t_s == 10.0
+
+    def test_summary_string(self):
+        chain = CareChain()
+        chain.record("handoff", PlatformType.PET, 0.0)
+        chain.record("handoff", PlatformType.PET, 1.0)
+        s = chain.summary()
+        assert "CareChain" in s
+        assert "handoff" in s
+
+
+class TestEmotionEngine:
+    def test_assess_returns_emotion_state(self):
+        engine = EmotionEngine()
+        ctx = make_ctx()
+        result = engine.assess(ctx)
+        assert isinstance(result, EmotionState)
+
+    def test_valence_in_range(self):
+        engine = EmotionEngine()
+        ctx = make_ctx()
+        result = engine.assess(ctx)
+        assert 0.0 <= result.valence <= 1.0
+
+    def test_arousal_in_range(self):
+        engine = EmotionEngine()
+        ctx = make_ctx()
+        result = engine.assess(ctx)
+        assert 0.0 <= result.arousal <= 1.0
+
+    def test_high_pain_lowers_valence(self):
+        engine = EmotionEngine()
+        ctx_pain = make_ctx()
+        ctx_pain.vitals = VitalSigns(pain_level=9.0)
+        ctx_normal = make_ctx()
+        ctx_normal.vitals = VitalSigns(pain_level=0.0)
+        r_pain = engine.assess(ctx_pain)
+        r_normal = engine.assess(ctx_normal)
+        assert r_pain.valence <= r_normal.valence
+
+    def test_label_is_string(self):
+        engine = EmotionEngine()
+        ctx = make_ctx()
+        result = engine.assess(ctx)
+        assert isinstance(result.label, str)
+        assert result.label in ("calm", "anxious", "distressed", "sad", "neutral")
+
+
+class TestMemoryEngine:
+    def test_encode_returns_trace(self):
+        engine = MemoryEngine()
+        trace = engine.encode("test content", (1.0, 2.0), 0.0, tags=["test"])
+        assert isinstance(trace, MemoryTrace)
+
+    def test_recall_by_tag_finds_trace(self):
+        engine = MemoryEngine()
+        engine.encode("약 복용", (0.0, 0.0), 0.0, tags=["medication"])
+        results = engine.recall_by_tag("medication", 1.0)
+        assert len(results) >= 1
+
+    def test_recall_by_tag_misses_different_tag(self):
+        engine = MemoryEngine()
+        engine.encode("외출", (0.0, 0.0), 0.0, tags=["mobility"])
+        results = engine.recall_by_tag("medication", 1.0)
+        assert len(results) == 0
+
+    def test_memory_trace_strength_decays(self):
+        engine = MemoryEngine()
+        trace = engine.encode("event", (0.0, 0.0), 0.0)
+        s0 = trace.current_strength(0.0)
+        s1 = trace.current_strength(86400.0)  # 1 day later
+        assert s1 < s0
+
+    def test_strongest_recent_returns_n(self):
+        engine = MemoryEngine()
+        for i in range(5):
+            engine.encode(f"event {i}", (float(i), 0.0), float(i))
+        top = engine.strongest_recent(3, 5.0)
+        assert len(top) == 3
+
+
+class TestCognitiveAdapter:
+    def test_tick_returns_report(self):
+        adapter = CognitiveAdapter()
+        ctx = make_ctx()
+        report = adapter.tick(ctx)
+        assert isinstance(report, CognitiveReport)
+
+    def test_cognitive_omega_in_range(self):
+        adapter = CognitiveAdapter()
+        ctx = make_ctx()
+        report = adapter.tick(ctx)
+        assert 0.0 <= report.cognitive_omega <= 1.0
+
+    def test_recommended_action_is_string(self):
+        adapter = CognitiveAdapter()
+        ctx = make_ctx()
+        report = adapter.tick(ctx)
+        assert isinstance(report.recommended_action, str)
+
+    def test_emergency_flag_triggers_emergency_action(self):
+        adapter = CognitiveAdapter()
+        ctx = make_ctx()
+        ctx.extra["emergency"] = True
+        report = adapter.tick(ctx)
+        assert "emergency" in report.recommended_action
+
+
+class TestBatteryAdapter:
+    def test_tick_returns_report(self):
+        adapter = BatteryAdapter(PlatformType.WHEELCHAIR)
+        ctx = make_ctx()
+        report = adapter.tick(ctx)
+        assert isinstance(report, BatteryReport)
+
+    def test_full_battery_omega_is_one(self):
+        adapter = BatteryAdapter(PlatformType.WHEELCHAIR)
+        ctx = make_ctx()
+        ctx.extra["wheelchair_battery_pct"] = 100.0
+        report = adapter.tick(ctx)
+        assert report.omega_battery == 1.0
+
+    def test_critical_battery_omega_is_low(self):
+        adapter = BatteryAdapter(PlatformType.WHEELCHAIR)
+        ctx = make_ctx()
+        ctx.extra["wheelchair_battery_pct"] = 10.0
+        report = adapter.tick(ctx)
+        assert report.omega_battery <= 0.10
+        assert report.is_critical
+
+    def test_low_battery_flag(self):
+        adapter = BatteryAdapter(PlatformType.WHEELCHAIR)
+        ctx = make_ctx()
+        ctx.extra["wheelchair_battery_pct"] = 25.0
+        report = adapter.tick(ctx)
+        assert report.is_low
+
+    def test_range_km_estimate(self):
+        adapter = BatteryAdapter(PlatformType.WHEELCHAIR)
+        ctx = make_ctx()
+        ctx.extra["wheelchair_battery_pct"] = 50.0
+        report = adapter.tick(ctx)
+        assert report.estimated_range_km == 10.0  # 50% of 20km
+
+
+class TestSNNAdapter:
+    def test_classify_returns_pattern(self):
+        adapter = SNNAdapter()
+        ctx = make_ctx()
+        ctx.vitals = VitalSigns(heart_rate_bpm=72, spo2_pct=97, body_temp_c=36.5)
+        result = adapter.classify(ctx)
+        assert isinstance(result, SpikePattern)
+
+    def test_normal_vitals_classify_normal(self):
+        adapter = SNNAdapter()
+        ctx = make_ctx()
+        ctx.vitals = VitalSigns(heart_rate_bpm=72, spo2_pct=97, body_temp_c=36.5)
+        result = adapter.classify(ctx)
+        assert result.pattern_label == "normal"
+
+    def test_critical_vitals_classify_crisis(self):
+        adapter = SNNAdapter()
+        ctx = make_ctx()
+        ctx.vitals = VitalSigns(heart_rate_bpm=145, spo2_pct=85, body_temp_c=40.0)
+        result = adapter.classify(ctx)
+        assert result.pattern_label == "crisis"
+
+    def test_no_vitals_returns_unknown(self):
+        adapter = SNNAdapter()
+        ctx = make_ctx()
+        ctx.vitals = None
+        result = adapter.classify(ctx)
+        assert result.pattern_label == "unknown"
+
+    def test_encode_vitals_length(self):
+        adapter = SNNAdapter()
+        vitals = VitalSigns(heart_rate_bpm=72, spo2_pct=97, body_temp_c=36.5)
+        vec = adapter.encode_vitals(vitals)
+        assert len(vec) == 8
+
+
+class TestEmergencyAdapter:
+    def setup_method(self):
+        self.adapter = EmergencyAdapter()
+        self.profile = make_profile()
+
+    def test_no_emergency_returns_none(self):
+        ctx = make_ctx(profile=self.profile)
+        ctx.vitals = VitalSigns(heart_rate_bpm=72, spo2_pct=97, body_temp_c=36.5)
+        result = self.adapter.evaluate(ctx, {})
+        assert result is None
+
+    def test_fall_detected_creates_event(self):
+        ctx = make_ctx(profile=self.profile)
+        ctx.vitals = VitalSigns(heart_rate_bpm=72, spo2_pct=97, body_temp_c=36.5)
+        result = self.adapter.evaluate(ctx, {"fall_detected": True})
+        assert result is not None
+        assert result.event_type == "fall"
+
+    def test_critical_vitals_creates_event(self):
+        ctx = make_ctx(profile=self.profile)
+        ctx.vitals = VitalSigns(heart_rate_bpm=145, spo2_pct=85, body_temp_c=40.5)
+        result = self.adapter.evaluate(ctx, {})
+        assert result is not None
+        assert result.event_type == "vitals_critical"
+
+    def test_cooldown_prevents_duplicate(self):
+        ctx = make_ctx(profile=self.profile)
+        ctx.vitals = VitalSigns(heart_rate_bpm=145, spo2_pct=85, body_temp_c=40.5)
+        r1 = self.adapter.evaluate(ctx, {})
+        r2 = self.adapter.evaluate(ctx, {})   # same t_s → cooldown
+        assert r1 is not None
+        assert r2 is None
+
+    def test_get_recent_events(self):
+        ctx = make_ctx(profile=self.profile)
+        ctx.vitals = VitalSigns(heart_rate_bpm=145, spo2_pct=85, body_temp_c=40.5)
+        self.adapter.evaluate(ctx, {})
+        events = self.adapter.get_recent_events(5)
+        assert len(events) >= 1
+
+
+class TestOmegaMonitor:
+    def test_tick_returns_report(self):
+        mon = OmegaMonitor()
+        ctx = make_ctx()
+        ctx.vitals = VitalSigns(heart_rate_bpm=72, spo2_pct=97, body_temp_c=36.5)
+        report = mon.tick(ctx)
+        assert isinstance(report, OmegaReport)
+
+    def test_six_omega_factors_present(self):
+        mon = OmegaMonitor()
+        ctx = make_ctx()
+        report = mon.tick(ctx)
+        assert hasattr(report, "omega_vitals")
+        assert hasattr(report, "omega_fatigue")
+        assert hasattr(report, "omega_env")
+        assert hasattr(report, "omega_medication")
+        assert hasattr(report, "omega_battery")
+        assert hasattr(report, "omega_cognitive")
+
+    def test_healthy_is_safe(self):
+        mon = OmegaMonitor()
+        ctx = make_ctx()
+        ctx.vitals = VitalSigns(heart_rate_bpm=72, spo2_pct=97, body_temp_c=36.5)
+        report = mon.tick(ctx, battery_omega=1.0, cognitive_omega=1.0)
+        assert report.verdict == "SAFE"
+
+    def test_low_battery_reduces_omega(self):
+        mon = OmegaMonitor()
+        ctx = make_ctx()
+        ctx.vitals = VitalSigns(heart_rate_bpm=72, spo2_pct=97, body_temp_c=36.5)
+        r_full = mon.tick(ctx, battery_omega=1.0, cognitive_omega=1.0)
+        r_low  = mon.tick(ctx, battery_omega=0.10, cognitive_omega=1.0)
+        assert r_low.omega < r_full.omega
+
+    def test_as_dict_has_all_keys(self):
+        mon = OmegaMonitor()
+        ctx = make_ctx()
+        report = mon.tick(ctx)
+        d = report.as_dict()
+        assert "Ω_vitals" in d
+        assert "Ω_care" in d
+        assert "verdict" in d
+
+    def test_fall_triggers_emergency(self):
+        mon = OmegaMonitor()
+        ctx = make_ctx()
+        ctx.extra["accel_g"] = 5.0
+        report = mon.tick(ctx)
+        assert report.emergency
+        assert report.fall_detected
+
+
+class TestCareAgentV2:
+    def setup_method(self):
+        self.profile = make_profile()
+        self.agent = CareAgent(self.profile)
+
+    def test_session_start_records_chain_block(self):
+        # CareChain should have at least the session_start block
+        if self.agent._chain:
+            assert self.agent._chain.length >= 1
+            assert self.agent._chain._blocks[0].event_type == "session_start"
+
+    def test_chain_verifies_after_ticks(self):
+        ctx = self.agent.start_session()
+        for _ in range(5):
+            ctx, _ = self.agent.tick(ctx)
+        if self.agent._chain:
+            assert self.agent._chain.verify()
+
+    def test_person_state_updated_after_tick(self):
+        ctx = self.agent.start_session()
+        ctx.vitals = VitalSigns(heart_rate_bpm=85, spo2_pct=96, body_temp_c=37.0)
+        ctx, _ = self.agent.tick(ctx)
+        assert self.agent.person_state.heart_rate == 85.0
+
+    def test_mission_state_default(self):
+        assert self.agent.mission_state.mission_id == "default"
+        assert self.agent.mission_state.completion_ratio() == 0.0
+
+    def test_safety_state_has_verdict(self):
+        assert isinstance(self.agent.safety_state.verdict, str)
+
+    def test_get_omega_report_returns_report(self):
+        ctx = self.agent.start_session()
+        report = self.agent.get_omega_report(ctx)
+        if report is not None:
+            assert hasattr(report, "omega")
+            assert 0.0 <= report.omega <= 1.0
+
+    def test_summary_v2_contains_omega(self):
+        ctx = self.agent.start_session()
+        ctx, _ = self.agent.tick(ctx)
+        s = self.agent.summary()
+        assert "Ω_care" in s
+
+    def test_handoff_recorded_in_chain(self):
+        ctx = self.agent.start_session()
+        ctx.destination = (100.0, 200.0)
+        ctx.extra["go_out"] = True
+        ctx, _ = self.agent.tick(ctx)
+        if self.agent._chain and self.agent._pending_token:
+            events = [b.event_type for b in self.agent._chain._blocks]
+            assert "handoff_initiated" in events

@@ -141,3 +141,115 @@ class CareContext:
     t_s: float                          = 0.0
     dt_s: float                         = 0.1
     extra: Dict[str, Any]               = field(default_factory=dict)
+
+
+# ── 확장 스키마 v0.2.0 ────────────────────────────────────────────────────────
+
+@dataclass
+class ScheduleEvent:
+    """일정 이벤트."""
+    event_id: str
+    label: str                          # "병원 방문", "약 복용" 등
+    destination: Optional[Tuple[float, float]] = None
+    t_start_s: float = 0.0
+    duration_s: float = 3600.0
+    recurring: bool = False
+    completed: bool = False
+
+
+@dataclass
+class CareGoal:
+    """현재 케어 목표."""
+    goal_id: str
+    description: str
+    priority: int = 5                   # 1=최고, 10=최저
+    achieved: bool = False
+    t_created_s: float = 0.0
+
+
+@dataclass
+class PersonState:
+    """사용자의 종합 상태 벡터.
+
+    s⃗ = [pos_x, pos_y, fatigue, mood, pain, HR, SpO2, temp, BP, alert_level]
+
+    플랫폼 전환 시에도 이 벡터가 보존된다.
+    """
+    # 위치
+    pos_x: float = 0.0
+    pos_y: float = 0.0
+    # 신체
+    fatigue: float = 0.0                # [0, 1]
+    pain_level: float = 0.0            # [0, 10]
+    # 생체 (VitalSigns 의 핵심 요약)
+    heart_rate: float = 72.0
+    spo2: float = 97.0
+    temperature: float = 36.5
+    # 심리 (Amygdala Valence-Arousal)
+    valence: float = 0.5               # [-1, 1] 감정 극성 (0.5 = 중립)
+    arousal: float = 0.3               # [0, 1] 각성 수준
+    # 인지
+    alert_level: float = 1.0           # [0, 1] 인지 각성도
+    cognitive_load: float = 0.2        # [0, 1] 인지 부담
+
+    def emotion_magnitude(self) -> float:
+        """E = √(V² + A²) — 감정 강도."""
+        import math
+        v = self.valence - 0.5         # 중립 보정
+        return math.sqrt(v**2 + self.arousal**2)
+
+    def emotion_angle_deg(self) -> float:
+        """θ = arctan(A/V) — 감정 방향."""
+        import math
+        v = self.valence - 0.5
+        return math.degrees(math.atan2(self.arousal, v + 1e-9))
+
+    def as_vector(self) -> Tuple[float, ...]:
+        """s⃗ 상태 벡터 반환."""
+        return (self.pos_x, self.pos_y, self.fatigue, self.pain_level,
+                self.heart_rate, self.spo2, self.temperature,
+                self.valence, self.arousal, self.alert_level)
+
+
+@dataclass
+class MissionState:
+    """현재 케어 미션 상태.
+
+    M = completed_stages / total_stages
+    """
+    mission_id: str = ""
+    description: str = "일상 케어"
+    total_stages: int = 1
+    completed_stages: int = 0
+    current_destination: Optional[Tuple[float, float]] = None
+    waypoints: List[Tuple[float, float]] = field(default_factory=list)
+    schedule: List["ScheduleEvent"] = field(default_factory=list)
+    goals: List["CareGoal"] = field(default_factory=list)
+    origin: Optional[Tuple[float, float]] = None   # 출발지 (귀가용)
+    t_mission_start_s: float = 0.0
+
+    def completion_ratio(self) -> float:
+        """M ∈ [0, 1]"""
+        if self.total_stages == 0: return 1.0
+        return self.completed_stages / self.total_stages
+
+    def next_waypoint(self) -> Optional[Tuple[float, float]]:
+        return self.waypoints[0] if self.waypoints else self.current_destination
+
+
+@dataclass
+class SafetyState:
+    """안전 상태 종합.
+
+    Ω_safety = Ω_vitals × Ω_battery × Ω_network × Ω_platform
+    """
+    omega: float = 1.0
+    verdict: str = "SAFE"
+    wheelchair_battery_pct: float = 100.0
+    car_battery_pct: float = 100.0
+    network_ok: bool = True
+    platform_ok: bool = True
+    manual_override: bool = False      # 보호자 수동 개입 중
+    emergency_triggered: bool = False
+    last_emergency_t_s: float = -9999.0
+    emergency_contacts_notified: bool = False

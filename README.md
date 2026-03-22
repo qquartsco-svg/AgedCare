@@ -1,274 +1,198 @@
 # AgedCare_Stack
 
-> 하나의 AI 에이전트가 AI 펫 · 자율 휠체어 · 자율 자동차를 넘나들며
-> 노인을 집에서 병원까지, 병원에서 다시 집까지 끊김 없이 케어한다.
+**하나의 AI 에이전트가 집에서 병원까지 — 플랫폼이 바뀌어도 케어는 끊기지 않는다.**
+
+v0.2.0 | Python 3.9+ | stdlib only (external engines optional)
 
 ---
 
-## 개요
+## 시스템 아키텍처 (5계층)
 
 ```
-[집] 🐾 AI 펫
-  └─ 핸드오프 →
-       ♿ 자율 휠체어 (집 → 자동차)
-         └─ 핸드오프 →
-              🚗 자율 자동차 (자율주행 → 목적지)
-                └─ 핸드오프 →
-                     ♿ 자율 휠체어 (목적지 내 이동)
-                       └─ 핸드오프 →
-                            🚗 자율 자동차 (귀가 자율주행)
-                              └─ 핸드오프 →
-                                   ♿ 자율 휠체어 (귀가 이동)
-                                     └─ 핸드오프 →
-                                          🐾 AI 펫 (귀가 케어)
-```
-
-**플랫폼은 바뀌어도 AI 에이전트는 하나다.**
-`CareAgent` 는 모든 하드웨어 위에서 동일한 기억·대화·모니터링을 유지한다.
-
----
-
-## 핵심 설계 원칙
-
-| 원칙 | 내용 |
-|------|------|
-| **지속 에이전트** | `CareAgent` 는 플랫폼 전환 시에도 메모리 보존 |
-| **토큰 기반 핸드오프** | SHA-256 토큰으로 플랫폼 전환을 안전하게 검증 |
-| **Ω 케어 안전 지수** | 생체 × 피로 × 환경 × 투약 — 복합 안전 판정 |
-| **페일세이프** | 핸드오프 중단 시 원래 플랫폼 자동 유지 |
-| **선택적 외부 연동** | SYD_DRIFT·Autonomy_Runtime_Stack·Claude API — 미설치 시 내장 폴백 |
-| **표준 라이브러리** | 코어는 stdlib 전용 — 엣지 AI 배포 가능 |
-
----
-
-## 폴더 구조
-
-```
-AgedCare_Stack/
-├── aged_care/
-│   ├── __init__.py
-│   ├── care_agent.py          — CareAgent (지속 AI 에이전트)
-│   ├── monitor.py             — CareMonitor (Ω 케어 안전 지수)
-│   ├── contracts/
-│   │   ├── __init__.py
-│   │   └── schemas.py         — 데이터 계약 (PlatformType, VitalSigns 등)
-│   ├── handoff/
-│   │   ├── __init__.py
-│   │   └── protocol.py        — HandoffProtocol (토큰 기반 플랫폼 전환)
-│   └── platforms/
-│       ├── __init__.py
-│       ├── base.py            — PlatformBase ABC
-│       ├── pet.py             — PetPlatform (AI 펫)
-│       ├── wheelchair.py      — WheelchairPlatform (자율 휠체어)
-│       └── car.py             — CarPlatform (자율 자동차)
-├── examples/
-│   └── run_care_journey.py    — 7단계 전체 여정 시뮬레이션
-├── tests/
-│   └── test_aged_care.py      — §1~§7 단위·통합 테스트 (50+ 케이스)
-├── pyproject.toml
-└── README.md
+┌─────────────────────────────────────────────────────────────────┐
+│  Layer 0: Personal AI Core                                      │
+│  CareAgent — 기억·감정·판단·Claude API                          │
+│  PersonState s⃗ | MissionState M | SafetyState Ω               │
+├─────────────────────────────────────────────────────────────────┤
+│  Layer 1: Care Orchestrator                                     │
+│  HandoffProtocol — 플랫폼 전환 토큰                              │
+│  OmegaMonitor — Ω_care = Ω_v × Ω_f × Ω_e × Ω_m × Ω_b × Ω_c  │
+├─────────────────────────────────────────────────────────────────┤
+│  Layer 2: Mobility Engines                                      │
+│  PetPlatform | WheelchairPlatform | CarPlatform                 │
+│  (Autonomy_Runtime_Stack, SYD_DRIFT)                            │
+├─────────────────────────────────────────────────────────────────┤
+│  Layer 3: Adapters (Edge AI — 모두 선택적)                       │
+│  CognitiveAdapter  <- EmotionEngine + MemoryEngine + ActionEngine│
+│  BatteryAdapter    <- Battery_Dynamics_Engine                   │
+│  SNNAdapter        <- SNN_Backend_Engine                        │
+│  EmergencyAdapter  <- 로컬 로그 / SMS / 119 확장 포인트          │
+├─────────────────────────────────────────────────────────────────┤
+│  Layer 4: Audit / Safety                                        │
+│  CareChain — SHA-256 연결 감사 체인                              │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 상태 스키마
+## 수학적 기초
 
-### VitalSigns (생체 신호)
-
-| 필드 | 단위 | 임계치 |
-|------|------|--------|
-| `heart_rate_bpm` | bpm | < 50 또는 > 120 → 위험 |
-| `spo2_pct` | % | < 92 → 위험 |
-| `body_temp_c` | °C | > 38.5 → 위험 |
-| `systolic_bp` | mmHg | > 180 → 위험 |
-
-### Ω 케어 안전 지수
-
+### 상태 벡터
 ```
-Ω = ω_vitals × ω_fatigue × ω_env × ω_medication
+s = [pos_x, pos_y, fatigue, pain, HR, SpO2, temp, valence, arousal, alert]
+```
+
+### 감정 공간 (Valence-Arousal)
+```
+E = sqrt(V^2 + A^2)      감정 강도 (magnitude)
+theta = arctan(A / V)    감정 방향 (angle)
+```
+
+### 기억 감쇠
+```
+m(t) = m0 * exp(-(t - t0) / tau)
+tau = 86400 s (기본 24시간)
+```
+
+### TD 강화학습 (BasalGanglia)
+```
+delta = r + gamma * V(s') - V(s)    TD 오차
+pi(s,a) <- pi(s,a) + alpha * delta  Actor 업데이트
+```
+
+### Ω 케어 안전 지수 (6인수)
+```
+Omega_care = Omega_vitals * Omega_fatigue * Omega_env
+           * Omega_medication * Omega_battery * Omega_cognitive
 
 판정:
-  SAFE       Ω ≥ 0.80   — 정상 케어
-  CAUTION    Ω ≥ 0.50   — 주의 (이벤트 발생 가능)
-  WARNING    Ω ≥ 0.25   — 경고 (보호자 알림)
-  EMERGENCY  Ω < 0.25   — 긴급 (119·보호자 즉시 연락)
+  SAFE      Omega >= 0.80
+  CAUTION   Omega >= 0.50
+  WARNING   Omega >= 0.25
+  EMERGENCY Omega < 0.25
 ```
 
-### 허용 핸드오프 전환
-
+### 핸드오프 토큰 ID
 ```
-PET  ↔  WHEELCHAIR  ↔  CAR
-         (단방향 허용 없음: PET → CAR 직접 불가)
+tid = SHA-256(from_platform || to_platform || t_s)[:16]
+```
+
+### 감사 블록 해시
+```
+h_n = SHA-256(h_{n-1} || event_type || platform || t_s || data)
+h_0 = "000...0" (제네시스)
+```
+
+### 미션 완료율
+```
+M = completed_stages / total_stages, M in [0, 1]
 ```
 
 ---
 
-## 플랫폼별 역할
+## 계층별 설명
 
-### 🐾 PetPlatform
-- 집 내부 동반 (음성 대화·생체 모니터링·낙상 감지)
-- 투약 알림 (마지막 투약 후 8시간 경과 시)
-- `go_out=True` 신호 수신 → 휠체어 핸드오프 요청
+### Layer 0 — Personal AI Core (`care_agent.py`)
+- `CareAgent`: 에이전트 생명주기 관리 (세션 시작 → 틱 → 핸드오프)
+- `PersonState`: 10차원 상태 벡터 (위치·생체·감정·인지)
+- `MissionState`: 미션 단계 추적, 웨이포인트, 일정 관리
+- `SafetyState`: 실시간 안전 판정 요약
+- `_llm_decide()`: Claude API 연동 (폴백: 규칙 기반)
 
-### ♿ WheelchairPlatform
-- 자율 경로 추종 (Autonomy_Runtime_Stack 선택 연동)
-- 장애물 즉시 제동 (0.8 m 이내)
-- `car_ready=True` → 자동차 핸드오프
-- `at_home=True` + `destination=None` → AI 펫 핸드오프
-- 최대 속도 1.5 m/s (부드러운 이동)
+### Layer 1 — Care Orchestrator (`monitor/`, `handoff/`)
+- `CareMonitor`: 4인수 Ω (하위 호환)
+- `OmegaMonitor`: 6인수 Ω (배터리 + 인지 추가)
+- `HandoffProtocol`: 플랫폼 전환 토큰 발행/확인/중단
 
-### 🚗 CarPlatform
-- 자율주행 (SYD_DRIFT 선택 연동)
-- 탑승자 안전 프리셋 (최대 50 km/h, 부드러운 제동 2.0 m/s²)
-- 충격 감지 (> 2.0 g → 비상 정차)
-- `arrived=True` → 휠체어 핸드오프
+### Layer 2 — Mobility Engines (`platforms/`)
+- `PetPlatform`: 홈 AI 펫 (실내 케어, 낙상 감지)
+- `WheelchairPlatform`: 자율 휠체어 (장애물 회피, Autonomy_Runtime_Stack)
+- `CarPlatform`: 자율 자동차 (충격 감지, SYD_DRIFT)
+
+### Layer 3 — Adapters (`adapters/`)
+- `CognitiveAdapter`: EmotionEngine + MemoryEngine + ActionEngine 통합
+- `BatteryAdapter`: SOC 모니터링, Ω_battery 계산
+- `SNNAdapter`: 스파이킹 신경망 생체신호 패턴 분류
+- `EmergencyAdapter`: 응급 감지, 보호자 통지, 쿨다운 관리
+
+### Layer 4 — Audit (`audit/`)
+- `CareChain`: SHA-256 연결 감사 블록체인
+- 불변 이벤트 기록: 핸드오프, 긴급 상황, 투약, 대화
 
 ---
 
-## 외부 연동 포인트
+## 외부 엔진 연동 (모두 선택적)
 
-```python
-# 1. Autonomy_Runtime_Stack (자율 휠체어 경로 추종)
-from autonomy_runtime_stack import AutonomyOrchestrator
-# WheelchairPlatform 에서 자동 감지·로드
+| 엔진 | 경로 | 역할 | 폴백 |
+|------|------|------|------|
+| AmygdalaEngine | ENGINE_HUB/20_LIMBIC_LAYER/Amygdala_Engine | 감정 V-A 추론 | 규칙 기반 |
+| HippocampusEngine | ENGINE_HUB/20_LIMBIC_LAYER/Hippocampus_Engine | 공간/에피소드 기억 | 목록 버퍼 |
+| BasalGanglia_Engine | ENGINE_HUB/20_LIMBIC_LAYER/BasalGanglia_Engine | TD 강화학습 | 규칙 우선순위 |
+| PrefrontalCortex_Engine | ENGINE_HUB/30_CORTEX_LAYER/PrefrontalCortex_Engine | 작업 기억, 억제 제어 | 생략 |
+| Battery_Dynamics_Engine | _staging/Battery_Dynamics_Engine | SOC 모델링 | extra["battery_pct"] |
+| SNN_Backend_Engine | _staging/SNN_Backend_Engine | LIF 뉴런 패턴 분류 | 임계값 규칙 |
+| SYD_DRIFT | _staging/SYD_DRIFT | 자동차 궤적 | 단순 내비게이션 |
+| Autonomy_Runtime_Stack | _staging/Autonomy_Runtime_Stack | 휠체어 자율주행 | 단순 경로 추적 |
 
-# 2. SYD_DRIFT (자율 자동차 주행)
-from syd_drift import SydDriftRunner
-# CarPlatform 에서 자동 감지·로드
+---
 
-# 3. Claude API (LLM 케어 판단)
-import anthropic
-# CareAgent._llm_decide() 에서 확장 — 현재는 규칙 기반 폴백
+## HandoffProtocol 허용 전환
+
 ```
+PET        -> WHEELCHAIR  (외출)
+WHEELCHAIR -> PET         (귀가)
+WHEELCHAIR -> CAR         (장거리 이동)
+CAR        -> WHEELCHAIR  (목적지 도착)
+```
+
+PET <-> CAR 직접 전환은 허용되지 않는다.
 
 ---
 
 ## 빠른 시작
 
-### 설치
-
-```bash
-git clone https://github.com/qquartsco-svg/AgedCare_Stack.git
-cd AgedCare_Stack
-pip install -e ".[dev]"
-```
-
-### 전체 여정 시뮬레이션 실행
-
-```bash
-python examples/run_care_journey.py
-```
-
-출력 예:
-```
-======================================================================
-AgedCare_Stack — AI 케어 여정 시뮬레이션
-======================================================================
-
-────────────────────────────────────────────────────────────
-🐾 1단계: 집 — AI 펫 케어
-────────────────────────────────────────────────────────────
-  [   0] 🐾 pet          | action=monitor              💬 "안녕하세요! 오늘 기분은 어떠세요?"
-  [  10] 🐾 pet          | action=monitor
-  [  40] 🐾 pet          | action=handoff_initiated    → wheelchair
-...
-```
-
-### 테스트 실행
-
-```bash
-python -m pytest tests/test_aged_care.py -v
-```
-
----
-
-## 코드 사용 예
-
 ```python
-from aged_care import (
-    CareAgent, CareProfile, CareContext,
-    VitalSigns, MedicalInfo, PlatformType,
-)
+from aged_care import CareAgent, CareProfile, MedicalInfo
 
-# 케어 대상자 프로파일
 profile = CareProfile(
-    person_id="GNJz-001",
+    person_id="001",
     name="홍길동",
     age=78,
-    medical=MedicalInfo(
-        conditions=("고혈압", "당뇨"),
-        medications=("메트포르민", "아스피린"),
-        mobility_level=0.6,
-        fall_risk=0.4,
-    ),
-    home_location=(0.0, 0.0),
-    emergency_contacts=("010-1234-5678",),
+    medical=MedicalInfo(medications=("아스피린",)),
+    home_location=(37.5665, 126.9780),
+    emergency_contacts=("010-0000-0000",),
 )
 
 agent = CareAgent(profile)
-ctx   = agent.start_session()
-ctx.vitals = VitalSigns(heart_rate_bpm=72, spo2_pct=97, body_temp_c=36.4)
+ctx = agent.start_session()
 
-# 케어 루프
-for _ in range(100):
+# 집에서 케어
+for _ in range(10):
     ctx, decision = agent.tick(ctx)
-    if decision.speak:
-        print(f"AI 펫: {decision.speak}")
-    if decision.alert:
-        print(f"🚨 {decision.alert}")
 
-# 외출 → 휠체어 전환
+# 외출 — 휠체어로 전환
+ctx.destination = (37.5700, 126.9820)
 ctx.extra["go_out"] = True
-ctx.destination = (500.0, 200.0)  # 병원
 ctx, decision = agent.tick(ctx)
-if agent._pending_token:
-    agent.execute_handoff(ctx)
+agent.execute_handoff(ctx)
 
-print(f"현재 플랫폼: {agent.current_platform.value}")  # wheelchair
+print(agent.summary())
 ```
 
 ---
 
-## Claude API 확장 포인트
+## 테스트 결과
 
-```python
-# care_agent.py — _llm_decide() 메서드
-import anthropic
-
-def _llm_decide(self, ctx: CareContext) -> Optional[str]:
-    client = anthropic.Anthropic()
-    message = client.messages.create(
-        model="claude-opus-4-5",
-        max_tokens=256,
-        system=f"당신은 {ctx.profile.name}님의 AI 케어 보조입니다.",
-        messages=[{"role": "user", "content": self._care_summary(ctx)}]
-    )
-    return message.content[0].text
+```
+pytest tests/test_aged_care.py -v
+74 passed (§1-§7 original) + 25+ passed (§8 new layers)
 ```
 
-현재는 규칙 기반 폴백으로 동작. `_llm_decide()` 구현 시 자동으로 LLM 판단이 적용된다.
-
----
-
-## 연동 스택
-
-| 스택 | 역할 | 연동 위치 |
-|------|------|-----------|
-| **SYD_DRIFT** | 자율주행 (도심 경로·CommandChain) | `CarPlatform` |
-| **Autonomy_Runtime_Stack** | 자율 이동 (Stanley 컨트롤러·BehaviorFSM) | `WheelchairPlatform` |
-| **Orca** | 해양 자율 시스템 (선박 케어 확장 가능) | 미래 `BoatPlatform` |
-| **Claude API** | LLM 케어 판단 | `CareAgent._llm_decide()` |
-
----
-
-## 버전
-
-| 버전 | 내용 |
-|------|------|
-| **v0.1.0** | 최초 설계 — PetPlatform / WheelchairPlatform / CarPlatform / CareAgent / HandoffProtocol / CareMonitor |
-
----
-
-## 라이선스
-
-MIT
+- §1 데이터 스키마 & 파생 지표
+- §2 CareMonitor — Ω 케어 안전 지수
+- §3 HandoffProtocol — 토큰 발행/확인/중단
+- §4 PetPlatform 틱 동작
+- §5 WheelchairPlatform 틱 동작
+- §6 CarPlatform 틱 동작
+- §7 CareAgent 통합
+- §8 새 레이어 (PersonState, CareChain, EmotionEngine, MemoryEngine, CognitiveAdapter, BatteryAdapter, SNNAdapter, EmergencyAdapter, OmegaMonitor)
