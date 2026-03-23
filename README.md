@@ -259,6 +259,7 @@ CAR  →  WHEELCHAIR   목적지 도착 시 하차
 - `BatteryAdapter`: SOC 모니터링, 5단계 Ω_battery 계산
 - `SNNAdapter`: 스파이킹 신경망 생체신호 패턴 분류 (normal/stress/crisis/recovery)
 - `EmergencyAdapter`: 낙상·생체위기·충격 감지, 보호자 통지, 쿨다운 관리
+- `NexusAdapter`: 현장 케어 상태 → executive brief / Nexus signal / Pharaoh report
 
 ### Layer 4 — Audit (`audit/`)
 - `CareChain`: SHA-256 연결 감사 블록체인
@@ -328,6 +329,36 @@ agent.execute_handoff(ctx)              # PET → WHEELCHAIR
 # AI가 휠체어의 몸으로 이동을 이어간다
 
 print(agent.summary())
+```
+
+### Executive Reporting (Nexus / Pharaoh)
+
+고위 사용자나 의사결정권자 케이스에서는 현장 케어 상태를
+상위 orchestration 계층에 업무 보고 형태로 올릴 수 있다.
+
+```python
+from aged_care import (
+    build_executive_brief,
+    executive_brief_to_nexus_signal,
+    executive_brief_to_pharaoh_report,
+)
+
+brief = build_executive_brief(ctx=ctx, safety=ctx.safety_state, decision=decision)
+nexus_signal = executive_brief_to_nexus_signal(brief)
+pharaoh_report = executive_brief_to_pharaoh_report(brief)
+```
+
+이 흐름은 다음 의미를 가진다.
+
+- `AgedCare`: 사람 곁 현장 케어
+- `Nexus`: 상위 orchestration / 보고 집계
+- `Athena`: 공공 판단과 상황 해석
+- `Pharaoh`: 최종 칙령 추천
+
+예제 실행:
+
+```bash
+python examples/run_executive_reporting.py
 ```
 
 ### 전체 여정 시뮬레이션 (7단계)

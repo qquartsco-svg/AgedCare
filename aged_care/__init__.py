@@ -35,6 +35,19 @@ except Exception:
     pass
 
 try:
+    from .adapters.nexus_adapter import (
+        AgedCareExecutiveBrief,
+        AgedCareNexusSignal,
+        build_executive_brief,
+        executive_brief_lines,
+        executive_brief_to_nexus_signal,
+        executive_brief_to_pharaoh_report,
+        merge_briefs,
+    )
+except Exception:
+    pass
+
+try:
     from .audit.care_chain import CareChain
 except Exception:
     pass
@@ -58,6 +71,12 @@ __all__ = [
     "CognitiveAdapter",
     "BatteryAdapter",
     "EmergencyAdapter",
+    "AgedCareExecutiveBrief", "AgedCareNexusSignal",
+    "build_executive_brief",
+    "executive_brief_lines",
+    "executive_brief_to_nexus_signal",
+    "executive_brief_to_pharaoh_report",
+    "merge_briefs",
     "CareChain",
     "OmegaMonitor",
 ]
