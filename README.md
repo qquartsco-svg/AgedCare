@@ -351,9 +351,27 @@ pharaoh_report = executive_brief_to_pharaoh_report(brief)
 이 흐름은 다음 의미를 가진다.
 
 - `AgedCare`: 사람 곁 현장 케어
+- `ExecutiveBrief`: 현장 상태의 요약 계약
 - `Nexus`: 상위 orchestration / 보고 집계
 - `Athena`: 공공 판단과 상황 해석
 - `Pharaoh`: 최종 칙령 추천
+
+현재 구현에서 실제로 추가된 핵심 함수는 다음과 같다.
+
+- `build_executive_brief()`
+- `executive_brief_to_nexus_signal()`
+- `executive_brief_to_pharaoh_report()`
+- `executive_brief_lines()`
+- `merge_briefs()`
+
+즉 이 스택은 이제 단순 현장 케어를 넘어서,
+**고위 사용자/의사결정권자의 건강·피로·인지부하·긴급도를
+상위 운영 계층에 업무 보고 형태로 올리는 구조**까지 갖는다.
+
+관련 파일:
+
+- `aged_care/adapters/nexus_adapter.py`
+- `examples/run_executive_reporting.py`
 
 예제 실행:
 
@@ -395,7 +413,7 @@ AgedCare_Stack — AI 케어 여정 시뮬레이션
 python -m pytest tests/test_aged_care.py -v
 ```
 
-> **테스트 범위:** 아래 137개는 소프트웨어 **논리·통합 테스트**다.
+> **테스트 범위:** 아래 167개는 소프트웨어 **논리·통합 테스트**다.
 > 데이터 계약 정합성, 상태 기계 전이, Ω 수식, 핸드오프 프로토콜을 검증한다.
 > 실제 하드웨어 연동·임상 케어·실도로 자율주행의 현실 검증은 포함하지 않는다.
 
@@ -409,7 +427,8 @@ python -m pytest tests/test_aged_care.py -v
 | §6 | CarPlatform 틱 동작 | ✅ |
 | §7 | CareAgent 통합 | ✅ |
 | §8 | 새 레이어 (PersonState, CareChain, Cognitive, Battery, SNN, Emergency, OmegaMonitor) | ✅ |
-| **합계** | | **137 passed (논리·통합 테스트 기준)** |
+| §9 | Executive reporting / Nexus adapter / governance signal | ✅ |
+| **합계** | | **167 passed (논리·통합 테스트 기준)** |
 
 ---
 
@@ -438,13 +457,16 @@ AgedCare_Stack/
 │   │   ├── cognitive_adapter.py  Layer 3 — 인지 엔진 통합
 │   │   ├── battery_adapter.py    Layer 3 — 배터리 모니터링
 │   │   ├── snn_adapter.py        Layer 3 — 스파이킹 신경망
-│   │   └── emergency_adapter.py  Layer 3 — 긴급 연락
+│   │   ├── emergency_adapter.py  Layer 3 — 긴급 연락
+│   │   └── nexus_adapter.py      Layer 3 — executive reporting / Nexus bridge
 │   └── audit/
 │       └── care_chain.py      Layer 4 — SHA-256 감사 체인
 ├── examples/
-│   └── run_care_journey.py    7단계 전체 여정 시뮬레이션
+│   ├── run_care_journey.py        7단계 전체 여정 시뮬레이션
+│   └── run_executive_reporting.py executive brief / Nexus / Pharaoh 예제
 └── tests/
-    └── test_aged_care.py      §1~§8 단위·통합 테스트 137개
+    ├── test_aged_care.py      §1~§8 단위·통합 테스트
+    └── test_nexus_adapter.py  §9 executive reporting 회귀 테스트
 ```
 
 ---
