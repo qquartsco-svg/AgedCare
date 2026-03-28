@@ -16,7 +16,7 @@
 
 | 항목 | 값 |
 |------|-----|
-| GitHub | https://github.com/qquartsco-svg/AgedCare_Stack |
+| GitHub | https://github.com/qquartsco-svg/AgedCare |
 | 패키지 | `aged-care-stack` (모듈 `aged_care`) |
 | 버전 | `VERSION`, `pyproject.toml`, `aged_care.__version__` 와 동기화 |
 

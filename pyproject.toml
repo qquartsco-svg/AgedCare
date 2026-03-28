@@ -13,9 +13,9 @@ keywords        = ["aged-care", "autonomous", "wheelchair", "care-agent", "ai-pe
 authors         = [{ name = "quarts co. / GNJz" }]
 
 [project.urls]
-Homepage   = "https://github.com/qquartsco-svg/AgedCare_Stack"
-Repository = "https://github.com/qquartsco-svg/AgedCare_Stack"
-Issues     = "https://github.com/qquartsco-svg/AgedCare_Stack/issues"
+Homepage   = "https://github.com/qquartsco-svg/AgedCare"
+Repository = "https://github.com/qquartsco-svg/AgedCare"
+Issues     = "https://github.com/qquartsco-svg/AgedCare/issues"
 
 [project.optional-dependencies]
 autonomy = ["autonomy-runtime-stack"]

@@ -16,7 +16,7 @@ Here, **blockchain** means an **integrity / audit pattern**, not a public consen
 
 | | |
 |---|---|
-| GitHub | https://github.com/qquartsco-svg/AgedCare_Stack |
+| GitHub | https://github.com/qquartsco-svg/AgedCare |
 | Package | `aged-care-stack` (import `aged_care`) |
 | Version | Keep `VERSION`, `pyproject.toml`, `aged_care.__version__` aligned |
 

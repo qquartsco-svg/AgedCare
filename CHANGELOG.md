@@ -2,6 +2,7 @@
 
 ## 0.2.2
 
+- GitHub 저장소 정식 경로: https://github.com/qquartsco-svg/AgedCare (`AgedCare_Stack` 이름은 리다이렉트될 수 있음).
 - 무결성: `scripts/regenerate_signature.py`, `scripts/verify_signature.py`, `LICENSE`, `BLOCKCHAIN_INFO`/`BLOCKCHAIN_INFO_EN` 보강, `SIGNATURE.sha256` 재생성 워크플로 정리.
 - README / README_EN: 무결성 절차, 휠체어·4WD 연동 상세, 외부 엔진 표에 VPF·휠체어 FSM 행 추가.
 - `pyproject.toml` Repository URL 등 메타 보강.

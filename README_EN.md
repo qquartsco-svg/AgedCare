@@ -51,7 +51,7 @@ python -m pytest tests/ -q
 ## Quick start
 
 ```bash
-git clone https://github.com/qquartsco-svg/AgedCare_Stack.git
+git clone https://github.com/qquartsco-svg/AgedCare.git
 cd AgedCare_Stack
 pip install -e ".[dev]"
 ```
