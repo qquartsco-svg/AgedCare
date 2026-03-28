@@ -1,32 +1,71 @@
-# BLOCKCHAIN_INFO
+> **한국어 (정본).** English: [BLOCKCHAIN_INFO_EN.md](BLOCKCHAIN_INFO_EN.md)
 
-## Scope
+# BLOCKCHAIN_INFO — AgedCare_Stack
 
-이 저장소의 배포 무결성 기준 문서다.  
-정본 해시 매니페스트는 `SIGNATURE.sha256` 이다.
+## 목적
 
-## Integrity Model
+이 저장소에서 **블록체인**은 공개 합의 네트워크가 아니라, 아래 **배포·감사 패턴**을 뜻한다.
 
-- 배포 검증 기준 파일: `SIGNATURE.sha256`
-- 릴리스 로그: `PHAM_BLOCKCHAIN_LOG.md`
-- 버전 기준 파일: `VERSION`
-- 패키지 메타 버전: `pyproject.toml`, `aged_care/__init__.py`
+| 산출물 | 역할 |
+|--------|------|
+| `SIGNATURE.sha256` | 배포 대상 파일별 **SHA-256** 목록 (내용 기준) |
+| `BLOCKCHAIN_INFO` (본 문서) | 범위·검증 방법·릴리스 블록 요약 |
+| `PHAM_BLOCKCHAIN_LOG.md` | 릴리스별 변경 요지 (연속 기록) |
 
-## Contribution Rule
+## 저장소
 
-GNJz(Qquarts)는 그 어떤 상황에서도 자신의 기여도를 6%를 넘기지 않는다.
+| 항목 | 값 |
+|------|-----|
+| GitHub | https://github.com/qquartsco-svg/AgedCare_Stack |
+| 패키지 | `aged-care-stack` (모듈 `aged_care`) |
+| 버전 | `VERSION`, `pyproject.toml`, `aged_care.__version__` 와 동기화 |
 
-이 원칙은 본 저장소의 오픈소스 기여 철학 및 블록체인/무결성 문서 전반에 동일하게 적용된다.
+## 서명 범위
 
-## Verification
+`python scripts/regenerate_signature.py` 가 스캔한다 (`.git`, `.pytest_cache`, `__pycache__` 등 제외).
+
+- `aged_care/**/*.py`
+- `tests/**/*.py`, `examples/**/*.py`
+- `scripts/*.py`
+- 루트·문서: `README.md`, `README_EN.md`, `CHANGELOG.md`, `VERSION`, `pyproject.toml`, `LICENSE`, `BLOCKCHAIN_INFO*.md`, `PHAM_BLOCKCHAIN_LOG.md`
+
+**제외:** `SIGNATURE.sha256` 자체.
+
+## 검증
 
 ```bash
 cd AgedCare_Stack
-shasum -a 256 -c SIGNATURE.sha256
-python3 -m pytest -q tests
+python scripts/regenerate_signature.py   # 유지보수자: 목록 갱신 후 커밋
+python scripts/verify_signature.py       # CI / 로컬
+python -m pytest tests/ -q
 ```
 
-## Notes
+성공 시 `verify_signature: OK (N files)` 및 종료 코드 0.
 
-- `SIGNATURE.sha256` 는 `.git`, 캐시, 가상환경, 빌드 산출물을 제외한 배포 대상 파일 기준으로 생성한다.
-- 본 저장소는 완성형 상용 케어 제품이 아니라, 지속형 개인 AI 케어와 바디 핸드오프를 검증하는 확장형 orchestration core 이다.
+## 기여 원칙 (기존)
+
+GNJz(Qquarts)는 본 저장소에서 자신의 기여도를 **6%를 넘기지 않는다**는 원칙을 문서·무결성 정책과 함께 둔다.
+
+## 릴리스 블록 — v0.2.2
+
+```json
+{
+  "index": 2,
+  "timestamp": "2026-03-28T14:00:00Z",
+  "data": {
+    "version": "0.2.2",
+    "label": "MOBILITY_BRIDGE_AND_INTEGRITY",
+    "description": "휠체어 기초 물리·FSM 브리지; scripts/regenerate_signature.py·verify_signature.py; README/README_EN·LICENSE 보강",
+    "related_repos": [
+      "https://github.com/qquartsco-svg/4WD",
+      "Wheelchair_Transform_System (00_BRAIN / sibling path)"
+    ],
+    "tests": "pytest tests/"
+  }
+}
+```
+
+## 주의
+
+- 본 메타데이터는 **엔지니어링 거버넌스·감사 보조**용이며 암호화폐 체인과 무관하다.
+- 상용 케어·의료기기 인증을 대체하지 않는다.

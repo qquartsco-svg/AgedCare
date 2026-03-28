@@ -4,12 +4,18 @@ build-backend = "setuptools.backends.legacy:build"
 
 [project]
 name            = "aged-care-stack"
-version         = "0.2.0"
-description     = "AI 케어 시스템 — 하나의 에이전트가 AI 펫·자율 휠체어·자율 자동차를 넘나들며 노인을 케어한다"
+version         = "0.2.2"
+description     = "AI 케어 시스템 — 펫·휠체어·자동차 바디 핸드오프; 휠체어 기초 물리(VPF/4WD)·FSM 브리지 선택 연동"
 readme          = "README.md"
 license         = {text = "MIT"}
 requires-python = ">=3.9"
-keywords        = ["aged-care", "autonomous", "wheelchair", "care-agent", "ai-pet"]
+keywords        = ["aged-care", "autonomous", "wheelchair", "care-agent", "ai-pet", "00_BRAIN"]
+authors         = [{ name = "quarts co. / GNJz" }]
+
+[project.urls]
+Homepage   = "https://github.com/qquartsco-svg/AgedCare_Stack"
+Repository = "https://github.com/qquartsco-svg/AgedCare_Stack"
+Issues     = "https://github.com/qquartsco-svg/AgedCare_Stack/issues"
 
 [project.optional-dependencies]
 autonomy = ["autonomy-runtime-stack"]

@@ -22,14 +22,36 @@ from ..contracts.schemas import (
 )
 from ..monitor import CareMonitor
 from ..monitor.omega import OmegaMonitor
+from ..bridges.wheelchair_physics import evaluate_wheelchair_mobility_foundation
 
 
 class WheelchairConfig:
-    max_speed_ms: float   = 1.5      # 최대 속도 (m/s, ~5.4 km/h)
-    max_accel_ms2: float  = 0.3      # 최대 가속도 (부드럽게)
-    obstacle_stop_m: float = 0.8     # 장애물 정지 거리 (m)
-    tilt_limit_deg: float  = 8.0     # 최대 기울기 허용 (도)
-    car_dock_range_m: float = 1.0    # 자동차 도킹 판정 거리 (m)
+    """휠체어 운행 + 00_BRAIN 기초 물리(`vehicle_platform_foundation`) 파라미터."""
+
+    max_speed_ms: float = 1.5
+    max_accel_ms2: float = 0.3
+    obstacle_stop_m: float = 0.8
+    tilt_limit_deg: float = 8.0
+    car_dock_range_m: float = 1.0
+
+    rider_mass_kg: float = 70.0
+    chair_frame_mass_kg: float = 85.0
+    wheelbase_m: float = 0.68
+    track_width_m: float = 0.58
+    cg_height_m: float = 0.38
+    cg_longitudinal_from_rear_m: float = 0.34
+    tire_rolling_radius_m: float = 0.14
+    tire_mu_long: float = 0.72
+    rolling_resistance_coef: float = 0.018
+    aero_cd: float = 0.95
+    frontal_area_m2: float = 0.55
+    motor_peak_torque_nm: float = 28.0
+    motor_peak_power_kw: float = 0.75
+    motor_max_shaft_rpm: float = 2500.0
+    overall_drive_ratio: float = 14.0
+    drivetrain_efficiency: float = 0.86
+    physics_assess_shaft_rpm: float = 600.0
+    torque_front_fraction: float = 0.5
 
 
 class WheelchairActuator:
@@ -60,6 +82,7 @@ class WheelchairPlatform(PlatformBase):
         self._speed   = 0.0
         self._heading = 0.0
         self._tick    = 0
+        self._speed_cap_ms = self._cfg.max_speed_ms
         # Autonomy_Runtime_Stack 오케스트레이터 (선택)
         self._orch    = self._try_load_orch()
 
@@ -80,6 +103,11 @@ class WheelchairPlatform(PlatformBase):
           4. 자율 경로 추종
         """
         self._tick += 1
+        # ── 0. 휠체어 기초 물리·FSM (AgedCare 이동 바디 = 휠체어 실체) ──
+        mob = evaluate_wheelchair_mobility_foundation(ctx, self._cfg)
+        ctx.extra["wheelchair_mobility_layer"] = mob
+        self._speed_cap_ms = float(mob.get("suggested_max_speed_ms", self._cfg.max_speed_ms))
+
         bat_omega = float(ctx.extra.get("battery_omega", 1.0))
         cog_omega = float(ctx.extra.get("cognitive_omega", 1.0))
         result  = self._monitor.tick(ctx, bat_omega, cog_omega)
@@ -143,7 +171,8 @@ class WheelchairPlatform(PlatformBase):
         """폴백 내장 제어 (Autonomy_Runtime_Stack 미설치 시)."""
         if self._orch is not None:
             # Autonomy_Runtime_Stack 연동 (실제 배포 시)
-            return WheelchairActuator(speed_ms=self._cfg.max_speed_ms * 0.6)
+            spd = min(self._cfg.max_speed_ms * 0.6, self._speed_cap_ms)
+            return WheelchairActuator(speed_ms=spd)
 
         # 폴백: 목적지 방향으로 저속 이동
         if ctx.destination:
@@ -151,5 +180,6 @@ class WheelchairPlatform(PlatformBase):
             dy = ctx.destination[1] - self._pos[1]
             dist = (dx**2 + dy**2) ** 0.5
             spd  = min(self._cfg.max_speed_ms, dist * 0.5)
+            spd = min(spd, self._speed_cap_ms)
             return WheelchairActuator(speed_ms=spd)
         return WheelchairActuator()

@@ -1,8 +1,10 @@
+> **한국어 (정본).** English: [README_EN.md](README_EN.md)
+
 # AgedCare_Stack
 
 > **하나의 개인 AI가 여러 몸체를 갈아타며 끊기지 않고 케어를 이어간다.**
 
-v0.2.0 · Python 3.9+ · stdlib only (external engines optional)
+v0.2.2 · Python 3.9+ · stdlib only (외부 엔진은 선택)
 
 > **⚠️ 프로토타입 고지**
 > 본 패키지는 개인 케어 운영 스택의 **소프트웨어 프로토타입**이다.
@@ -103,6 +105,8 @@ AI = 영혼 (Soul)
 - 최대 속도 1.5 m/s (노인 안전 속도)
 - 자동차 도착 감지 → 탑승 안내 및 AI 상태 전달
 
+**기초 물리·휠체어 FSM (v0.2.1+):** AgedCare의 이동 바디가 휠체어일 때, 케어 맥락 아래에 **질량·축하중·접지/동력 예산**을 둔다. `WheelchairPlatform` 틱마다 `aged_care/bridges/wheelchair_physics.py` 가 (PYTHONPATH에 있을 때) `vehicle_platform_foundation` 의 `assess_platform` 과 `wheelchair_transform_system` 의 착석 FSM 프로브를 호출하고, 결과를 `CareContext.extra["wheelchair_mobility_layer"]` 에 넣으며 **제안 상한 속도**로 내비 속도를 깎는다. 스택이 없으면 플래그만 False 로 두고 기존 폴백 동작.
+
 ### 🚗 자율 자동차 (장거리 이동)
 - 목적지까지 자율주행
 - 노인 보호 속도 프리셋 (최대 50 km/h, 부드러운 제동)
@@ -126,7 +130,8 @@ AI = 영혼 (Soul)
 ├─────────────────────────────────────────────────────────────────┤
 │  Layer 2: Mobility Engines                                      │
 │  PetPlatform | WheelchairPlatform | CarPlatform                 │
-│  (Autonomy_Runtime_Stack, SYD_DRIFT)                            │
+│  + bridges/wheelchair_physics → VPF + Wheelchair_Transform       │
+│  (Autonomy_Runtime_Stack, SYD_DRIFT — 선택)                      │
 ├─────────────────────────────────────────────────────────────────┤
 │  Layer 3: Adapters (Edge AI — 모두 선택적)                       │
 │  CognitiveAdapter  ← EmotionEngine + MemoryEngine + ActionEngine│
@@ -283,6 +288,52 @@ CAR  →  WHEELCHAIR   목적지 도착 시 하차
 | SYD_DRIFT | 자동차 자율주행 궤적 | 단순 내비게이션 |
 | Autonomy_Runtime_Stack | 휠체어 자율주행 | 단순 경로 추적 |
 | Claude API (anthropic) | LLM 케어 판단 | 규칙 기반 |
+| **vehicle_platform_foundation** (공개 미러 [**4WD**](https://github.com/qquartsco-svg/4WD)) | 휠체어 **기초 물리** (질량·축하중·접지·동력) | 브리지 미로드 시 스킵 |
+| **wheelchair_transform_system** (00_BRAIN 동위 스테이징) | 휠체어 **FSM·HAL** (착석 프로브) | 브리지 미로드 시 스킵 |
+
+---
+
+## 무결성 · 블록체인 스타일 서명
+
+배포·감사용으로 파일 내용 해시 목록을 유지한다 (암호화폐 체인 아님).
+
+| 파일 | 설명 |
+|------|------|
+| `SIGNATURE.sha256` | 추적 대상 파일별 SHA-256 |
+| `BLOCKCHAIN_INFO.md` / `BLOCKCHAIN_INFO_EN.md` | 정책·검증·릴리스 블록 |
+| `PHAM_BLOCKCHAIN_LOG.md` | 릴리스 변경 요지 연속 기록 |
+| `scripts/regenerate_signature.py` | 목록 재생성 |
+| `scripts/verify_signature.py` | 현재 트리와 목록 비교 |
+
+```bash
+python scripts/regenerate_signature.py
+python scripts/verify_signature.py
+python -m pytest tests/ -q
+```
+
+성공 시 `verify_signature: OK (N files)` 가 출력된다.
+
+---
+
+## 휠체어 기초 물리 연동 (상세)
+
+**AgedCare의 이동 바디가 휠체어일 때**, 케어 AI 아래에 **실제 지상 플랫폼 물리층**을 둔다.
+
+1. **의미**  
+   - 케어 = 의도·말·Ω·핸드오프 (상위).  
+   - 휠체어 = 저속 자율·기립·전이가 일어나는 **몸**.  
+   - **4WD/VPF** = 그 몸을 2축·4접촉으로 읽는 **질량·접지·동력 예산** (하위).
+
+2. **코드 경로**  
+   - `aged_care/bridges/wheelchair_physics.py` → `assess_platform` + `run_phase_tick(SEATED_IDLE, …)`.  
+   - `WheelchairPlatform.tick` 이 매 틱 `ctx.extra["wheelchair_mobility_layer"]` 를 채우고 `suggested_max_speed_ms` 로 속도 상한을 제한한다.
+
+3. **실행 환경**  
+   - 단독 클론만 한 경우: 패키지가 없으면 `physics_available` / `fsm_available` 만 `False` — **코어 케어는 그대로 동작**.  
+   - 00_BRAIN 모노레포: `tests/conftest.py` 가 `_staging/Vehicle_Platform_Foundation` · `_staging/Wheelchair_Transform_System` 을 `PYTHONPATH`에 넣어 연동 테스트(170+ tests)가 통과한다.
+
+4. **확장용 `ctx.extra` 키 (선택)**  
+   - `slope_grade_deg`, `wheel_velocity_m_s`, `brake_engaged`, `estop_active` 등 — 향후 센서·경사와 정합할 때 사용.
 
 ---
 
@@ -410,10 +461,11 @@ AgedCare_Stack — AI 케어 여정 시뮬레이션
 ## 테스트
 
 ```bash
-python -m pytest tests/test_aged_care.py -v
+python -m pytest tests/ -q
+python scripts/verify_signature.py
 ```
 
-> **테스트 범위:** 아래 167개는 소프트웨어 **논리·통합 테스트**다.
+> **테스트 범위:** 아래 **170개 전후**는 소프트웨어 **논리·통합 테스트**다.
 > 데이터 계약 정합성, 상태 기계 전이, Ω 수식, 핸드오프 프로토콜을 검증한다.
 > 실제 하드웨어 연동·임상 케어·실도로 자율주행의 현실 검증은 포함하지 않는다.
 
@@ -428,7 +480,8 @@ python -m pytest tests/test_aged_care.py -v
 | §7 | CareAgent 통합 | ✅ |
 | §8 | 새 레이어 (PersonState, CareChain, Cognitive, Battery, SNN, Emergency, OmegaMonitor) | ✅ |
 | §9 | Executive reporting / Nexus adapter / governance signal | ✅ |
-| **합계** | | **167 passed (논리·통합 테스트 기준)** |
+| §10 | 휠체어·VPF·FSM 브리지 (`test_wheelchair_mobility_bridge`) | ✅ |
+| **합계** | | **170 passed (모노레포 동위 스택 경로 있을 때)** |
 
 ---
 
@@ -459,18 +512,29 @@ AgedCare_Stack/
 │   │   ├── snn_adapter.py        Layer 3 — 스파이킹 신경망
 │   │   ├── emergency_adapter.py  Layer 3 — 긴급 연락
 │   │   └── nexus_adapter.py      Layer 3 — executive reporting / Nexus bridge
+│   ├── bridges/
+│   │   └── wheelchair_physics.py  휠체어 ↔ VPF·휠체어 FSM 선택 연동
 │   └── audit/
 │       └── care_chain.py      Layer 4 — SHA-256 감사 체인
+├── scripts/
+│   ├── regenerate_signature.py  SIGNATURE.sha256 재생성
+│   └── verify_signature.py      무결성 검증
+├── LICENSE
+├── SIGNATURE.sha256
+├── BLOCKCHAIN_INFO.md / BLOCKCHAIN_INFO_EN.md
+├── PHAM_BLOCKCHAIN_LOG.md
 ├── examples/
 │   ├── run_care_journey.py        7단계 전체 여정 시뮬레이션
 │   └── run_executive_reporting.py executive brief / Nexus / Pharaoh 예제
 └── tests/
-    ├── test_aged_care.py      §1~§8 단위·통합 테스트
-    └── test_nexus_adapter.py  §9 executive reporting 회귀 테스트
+    ├── conftest.py            (선택) 동위 스택 PYTHONPATH
+    ├── test_aged_care.py      §1~§9 단위·통합 테스트
+    ├── test_nexus_adapter.py  executive reporting 회귀
+    └── test_wheelchair_mobility_bridge.py  휠체어·물리·FSM 브리지
 ```
 
 ---
 
 ## 라이선스
 
-MIT
+[LICENSE](LICENSE) — MIT (quarts co. / GNJz)

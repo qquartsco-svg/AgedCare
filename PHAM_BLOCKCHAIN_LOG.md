@@ -1,5 +1,12 @@
 # PHAM_BLOCKCHAIN_LOG
 
+## 0.2.2
+
+- 휠체어 기초 물리·FSM 브리지 (`aged_care/bridges/`, `WheelchairPlatform` 틱 연동) 문서화 강화.
+- `scripts/regenerate_signature.py`, `scripts/verify_signature.py`, `LICENSE`, `README_EN.md`, `BLOCKCHAIN_INFO_EN.md` 추가.
+- `BLOCKCHAIN_INFO.md` 갱신 (GitHub·검증 절차·v0.2.2 릴리스 블록).
+- 버전 정합: `0.2.2` (`VERSION`, `pyproject.toml`, `aged_care.__version__`).
+
 ## 0.2.0
 
 - 릴리스 버전 정합성 수정: README / package metadata / public API 를 `0.2.0` 으로 통일.

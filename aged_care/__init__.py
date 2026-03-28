@@ -1,9 +1,9 @@
-"""AgedCare_Stack — 범용 AI 케어 시스템 v0.2.0.
+"""AgedCare_Stack — 범용 AI 케어 시스템 v0.2.2.
 
 AI 펫 → 자율 휠체어 → 자율 자동차 → 자율 휠체어 → AI 펫
 하나의 AI 에이전트가 모든 플랫폼에서 연속으로 케어한다.
 """
-__version__ = "0.2.0"
+__version__ = "0.2.2"
 
 from .care_agent import CareAgent
 from .monitor    import CareMonitor, MonitorResult
@@ -57,6 +57,15 @@ try:
 except Exception:
     pass
 
+try:
+    from .bridges.wheelchair_physics import (
+        evaluate_wheelchair_mobility_foundation,
+        mobility_fsm_available,
+        mobility_physics_available,
+    )
+except Exception:
+    pass
+
 # 깔끔한 공개 API
 __all__ = [
     "CareAgent",
@@ -79,4 +88,7 @@ __all__ = [
     "merge_briefs",
     "CareChain",
     "OmegaMonitor",
+    "evaluate_wheelchair_mobility_foundation",
+    "mobility_physics_available",
+    "mobility_fsm_available",
 ]
